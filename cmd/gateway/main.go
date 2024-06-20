@@ -54,6 +54,7 @@ func main() {
 
 	addr := netlink.Addr{
 		IPNet: &net.IPNet{
+			// 100.255.254.0/19
 			IP:   net.ParseIP("100.255.254.4"),
 			Mask: net.CIDRMask(19, 32),
 		},
@@ -80,6 +81,7 @@ func main() {
 
 	// todo read secret containing the wireguard config for the gateways
 	log.Printf("wireguard device: %v", wgdev)
+	// wgdev.PrivateKey = privateKey
 
 	// route 10.244.0.0/16 traffic to wg
 	route := &netlink.Route{

@@ -1,4 +1,4 @@
-module wireguard_K8
+module github.com/t-chdossa_microsoft/aks-mesh
 
 go 1.22.2
 
