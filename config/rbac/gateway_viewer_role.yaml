@@ -1,0 +1,23 @@
+# permissions for end users to view gateways.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: aks-mesh
+    app.kubernetes.io/managed-by: kustomize
+  name: gateway-viewer-role
+rules:
+- apiGroups:
+  - aks.azure.com
+  resources:
+  - gateways
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - aks.azure.com
+  resources:
+  - gateways/status
+  verbs:
+  - get

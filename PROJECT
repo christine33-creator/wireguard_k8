@@ -16,4 +16,12 @@ resources:
   kind: Peer
   path: github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: azure.com
+  group: aks
+  kind: Gateway
+  path: github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1
+  version: v1alpha1
 version: "3"
