@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- aks_v1alpha1_peer.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

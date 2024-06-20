@@ -1,0 +1,23 @@
+# permissions for end users to view peers.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: aks-mesh
+    app.kubernetes.io/managed-by: kustomize
+  name: peer-viewer-role
+rules:
+- apiGroups:
+  - aks.azure.com
+  resources:
+  - peers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - aks.azure.com
+  resources:
+  - peers/status
+  verbs:
+  - get
