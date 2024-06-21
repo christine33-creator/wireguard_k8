@@ -39,13 +39,64 @@ spec:
           spec:
             description: PeerSpec defines the desired state of Peer
             properties:
-              foo:
-                description: Foo is an example field of Peer. Edit peer_types.go to
-                  remove/update
+              properties:
+              publicKey:
+                description: The WireGuard public key for the peer.
+                type: string
+              podIPs:
+                description: The list of pod IPs for the peer.
+                type: array
+                items:
+                  type: string
+              endpoint:
+                description: The reachable endpoint for the peer (e.g., node IP).
                 type: string
             type: object
           status:
             description: PeerStatus defines the observed state of Peer
+            address:
+                description: Address is the allocated IP address of this peer within the VPN network.
+                type: string
+            peers:
+                description: Peers is a computed list of peers that should be configured on this peer's wireguard interface.
+                type: array
+                items:
+                  type: object
+                  properties:
+                    allowedIPs:
+                      description: AllowedIPs is a list of IP addresses that should be allowed as the src parameter on IP packets coming from this peer. This also acts as a loose routing table, where subnet named here will be routed via this peer.
+                      type: array
+                      items:
+                        type: string
+                    endpoint:
+                      description: Endpoint is the optional endpoint address to connect to in order to establish a secure Wireguard link.
+                      type: string
+                    name:
+                      description: Name is the peer's name, as stored in its metadata.
+                      type: string
+                    publicKey:
+                      description: PublicKey is the public key that should be used to authenticate traffic from this peer.
+                      type: string
+                  required:
+                    - name
+                    - publicKey
+            conditions:
+                description: Current conditions of the Peer.
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastUpdateTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
             type: object
         type: object
     served: true
