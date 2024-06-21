@@ -39,9 +39,12 @@ spec:
           spec:
             description: GatewaySpec defines the desired state of Gateway
             properties:
-              foo:
-                description: Foo is an example field of Gateway. Edit gateway_types.go
-                  to remove/update
+              properties:
+              endpoint:
+                description: The endpoint of the gateway
+                type: string
+              publicKey:
+                description: The WireGuard public key of the gateway
                 type: string
             type: object
           status:
