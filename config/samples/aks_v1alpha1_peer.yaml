@@ -1,0 +1,9 @@
+apiVersion: aks.azure.com/v1alpha1
+kind: Peer
+metadata:
+  labels:
+    app.kubernetes.io/name: aks-mesh
+    app.kubernetes.io/managed-by: kustomize
+  name: peer-sample
+spec:
+  # TODO(user): Add fields here
