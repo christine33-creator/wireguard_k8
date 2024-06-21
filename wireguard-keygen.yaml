@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wireguard-keygen
+  namespace: 6670a837dc18810001228ed6  # Replace with your namespace
+spec:
+  template:
+    metadata:
+      labels:
+        job: wireguard-keygen
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node-role.kubernetes.io/wireguard-keygen
+            operator: In
+            values:
+            - "true"
+      containers:
+      - name: keygen
+        image: bash:latest
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            umask 077
+            wg genkey | tee /etc/wireguard/privatekey | wg pubkey > /etc/wireguard/publickey
+            PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
+            PUBLIC_KEY=$(cat /etc/wireguard/publickey)
+            kubectl create secret generic wireguard-keys --namespace 6670a837dc18810001228ed6 --from-literal=privatekey="$PRIVATE_KEY" --from-literal=publickey="$PUBLIC_KEY"
+        volumeMounts:
+        - name: wireguard-config
+          mountPath: /etc/wireguard
+      restartPolicy: OnFailure
+      volumes:
+      - name: wireguard-config
+        emptyDir: {}
