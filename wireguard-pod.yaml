@@ -1,0 +1,123 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: wireguard
+  labels:
+    name: wireguard
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pv-claim-wireguard
+  namespace: wireguard
+spec:
+  storageClassName: "standard"
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-wireguard
+spec:
+  capacity:
+    storage: 10Mi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: "standard"
+  hostPath:
+    path: /mnt/data
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wireguard-configmap
+  namespace: wireguard
+data:
+  PUID: "1000" #process user id id -u
+  PGID: "1000" #process user group id -g
+  TZ: "America/Los_Angeles" #timedatectl
+  SERVERPORT: "31820"
+  PEERS: "5"
+  PEERDNS: "172.25.0.100" #kubectl -n kube-system get svc | grep kube-dns | awk '{print $3}'
+  ALLOWEDIPS: "0.0.0.0/0, ::/0"
+  INTERNAL_SUBNET: "10.13.13.0/24"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wireguard
+  namespace: wireguard
+  labels:
+    app: wireguard
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node-role.kubernetes.io/wireguard-gateway
+            operator: In
+            values:
+            - "true"
+  containers:
+  - name: wireguard
+    image: ghcr.io/linuxserver/wireguard
+    envFrom:
+    - configMapRef:
+        name: wireguard-configmap
+    securityContext:
+      capabilities:
+        add:
+          - NET_ADMIN
+          - SYS_MODULE
+      privileged: true
+    volumeMounts:
+      - name: wg-config
+        mountPath: /config
+      - name: host-volumes
+        mountPath: /lib/modules
+      - name: wireguard-config
+        mountPath: /etc/wireguard
+        subPath: wg0.conf
+    ports:
+    - containerPort: 31820
+      protocol: UDP
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+  volumes:
+    - name: wg-config
+      persistentVolumeClaim:
+        claimName: pv-claim-wireguard
+    - name: host-volumes
+      hostPath:
+        path: /lib/modules
+        type: Directory
+    - name: wireguard-config
+      configMap:
+        name: wireguard-config
+---
+kind: Service
+apiVersion: v1
+metadata:
+  labels:
+    k8s-app: wireguard
+  name: wireguard-service
+  namespace: wireguard
+spec:
+  type: NodePort
+  ports:
+  - port: 51820
+    nodePort: 31820
+    protocol: UDP
+    targetPort: 51820
+  selector:
+    app: wireguard
