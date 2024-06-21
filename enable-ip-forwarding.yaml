@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: enable-ip-forwarding
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: enable-ip-forwarding
+  template:
+    metadata:
+      labels:
+        name: enable-ip-forwarding
+    spec:
+      containers:
+      - name: sysctl
+        image: busybox
+        command:
+        - /bin/sh
+        - -c
+        - |
+          sysctl -w net.ipv4.ip_forward=1
+          tail -f /dev/null
+        securityContext:
+          privileged: true
