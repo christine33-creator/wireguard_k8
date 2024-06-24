@@ -29,7 +29,14 @@ type PeerSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Foo is an example field of Peer. Edit peer_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// PublicKey is the WireGuard public key of the peer
+	PublicKey string `json:"publicKey"`
+
+	// PodIPs is a list of pod IPs associated with the peer
+	PodIPs []string `json:"podIPs"`
+	
+	// Endpoint is the network endpoint of the peer
+	Endpoint string `json:"endpoint"`
 }
 
 // PeerStatus defines the observed state of Peer
