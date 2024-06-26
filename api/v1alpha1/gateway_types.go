@@ -29,7 +29,8 @@ type GatewaySpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Foo is an example field of Gateway. Edit gateway_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	Endpoint  string `json:"endpoint"`
+	PublicKey string `json:"publicKey"`
 }
 
 // GatewayStatus defines the observed state of Gateway
