@@ -18,11 +18,18 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"log"
+	"os"
 
+	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/config"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 )
 
 // PeerReconciler reconciles a Peer object
@@ -45,17 +52,111 @@ type PeerReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.2/pkg/reconcile
 func (r *PeerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	//_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
+	log := ctrlLog.FromContext(ctx)
+
+	// Fetch the Peer instance
+	var peer v1alpha1.Peer
+	if err := r.Get(ctx, req.NamespacedName, &peer); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			log.Error(err, "Failed to get Peer")
+		}
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Ensure WireGuard setup
+	if err := r.ensureWireGuardSetup(&peer); err != nil {
+		log.Error(err, "Failed to ensure WireGuard setup")
+		return ctrl.Result{}, err
+	}
+
+	//example logic to update the status of the peer
+	peer.Status.Conditions = append(peer.Status.Conditions, metav1.Condition{
+        Type:    "Ready",
+        Status:  metav1.ConditionTrue,
+        Reason:  "Reconciled",
+        Message: "Peer successfully reconciled",
+    })
+
+    if err := r.Status().Update(ctx, &peer); err != nil {
+        log.Error(err, "unable to update Peer status")
+        return ctrl.Result{}, err
+    }
 
 	return ctrl.Result{}, nil
+}
+
+// ensureWireGuardSetup ensures the WireGuard setup for the Peer
+func (r *PeerReconciler) ensureWireGuardSetup(peer *v1alpha1.Peer) error {
+	la := netlink.NewLinkAttrs()
+	la.Name = "wg0"
+	link := &netlink.GenericLink{LinkAttrs: la, LinkType: "wireguard"}
+
+	// Ensure the WireGuard interface exists
+	if err := netlink.LinkAdd(link); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+
+	// Get the WireGuard interface
+	wgLink, err := netlink.LinkByName("wg0")
+	if err != nil {
+		return err
+	}
+
+	// Bring the interface up
+	if err := netlink.LinkSetUp(wgLink); err != nil {
+		return err
+	}
+
+	// Configure the WireGuard device
+	cli, err := wgctrl.New()
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+
+	// Create a WireGuard configuration
+	cfg := config.Config{
+		Interface: config.Interface{
+			PrivateKey:   peer.Spec.PrivateKey,
+			ListenPort:   peer.Spec.ListenPort,
+			ReplacePeers: true,
+		},
+		Peers: []config.Peer{
+			{
+				PublicKey: peer.Spec.PublicKey,
+				Endpoint:  peer.Spec.Endpoint,
+				AllowedIPs: peer.Spec.PodIPs,
+			},
+		},
+	}
+
+	if err := cli.ConfigureDevice("wg0", cfg); err != nil {
+		return err
+	}
+
+	// Add a route for the WireGuard network
+	route := &netlink.Route{
+		LinkIndex: wgLink.Attrs().Index,
+		Dst: &net.IPNet{
+			IP:   net.ParseIP("10.244.0.0"),
+			Mask: net.CIDRMask(16, 32),
+		},
+	}
+	if err := netlink.RouteAdd(route); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+
+	log.Printf("WireGuard setup completed for Peer %s/%s", peer.Namespace, peer.Name)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PeerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
-		// For().
+		For(&v1alpha1.Peer{}).
 		Complete(r)
 }
