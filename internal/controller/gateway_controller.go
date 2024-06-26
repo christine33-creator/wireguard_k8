@@ -52,10 +52,10 @@ type GatewayReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.2/pkg/reconcile
 func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	//_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
-		log := ctrlLog.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	// Fetch the Gateway instance
 	var gateway v1alpha1.Gateway
