@@ -7,3 +7,5 @@ metadata:
   name: gateway-sample
 spec:
   # TODO(user): Add fields here
+  endpoint: "10.0.0.1:51820"
+  publicKey: "samplePublicKey"
