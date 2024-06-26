@@ -18,11 +18,18 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"log"
+	"os"
 
+	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/config"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 )
 
 // GatewayReconciler reconciles a Gateway object
@@ -48,14 +55,93 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
+		log := ctrlLog.FromContext(ctx)
+
+	// Fetch the Gateway instance
+	var gateway v1alpha1.Gateway
+	if err := r.Get(ctx, req.NamespacedName, &gateway); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			log.Error(err, "Failed to get Gateway")
+		}
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Ensure WireGuard setup
+	if err := r.ensureWireGuardSetup(&gateway); err != nil {
+		log.Error(err, "Failed to ensure WireGuard setup")
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *GatewayReconciler) ensureWireGuardSetup(gateway *v1alpha1.Gateway) error {
+	la := netlink.NewLinkAttrs()
+	la.Name = "wg0"
+	link := &netlink.GenericLink{LinkAttrs: la, LinkType: "wireguard"}
+
+	// Ensure the WireGuard interface exists
+	if err := netlink.LinkAdd(link); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+
+	// Get the WireGuard interface
+	wgLink, err := netlink.LinkByName("wg0")
+	if err != nil {
+		return err
+	}
+
+	// Bring the interface up
+	if err := netlink.LinkSetUp(wgLink); err != nil {
+		return err
+	}
+
+	// Configure the WireGuard device
+	cli, err := wgctrl.New()
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+
+	// Create a WireGuard configuration
+	cfg := config.Config{
+		Interface: config.Interface{
+			PrivateKey:   gateway.Spec.PrivateKey,
+			ListenPort:   gateway.Spec.ListenPort,
+			ReplacePeers: true,
+		},
+		Peers: []config.Peer{
+			{
+				PublicKey: gateway.Spec.PublicKey,
+				Endpoint:  gateway.Spec.Endpoint,
+			},
+		},
+	}
+
+	if err := cli.ConfigureDevice("wg0", cfg); err != nil {
+		return err
+	}
+
+	// Add a route for the WireGuard network
+	route := &netlink.Route{
+		LinkIndex: wgLink.Attrs().Index,
+		Dst: &net.IPNet{
+			IP:   net.ParseIP("10.244.0.0"),
+			Mask: net.CIDRMask(16, 32),
+		},
+	}
+	if err := netlink.RouteAdd(route); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+
+	log.Printf("WireGuard setup completed for Gateway %s/%s", gateway.Namespace, gateway.Name)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *GatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
-		// For().
+		For(&v1alpha1.Gateway{}).
 		Complete(r)
 }
