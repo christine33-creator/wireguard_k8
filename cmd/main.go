@@ -126,14 +126,18 @@ func main() {
 	if err = (&controller.GatewayReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, ctrl.Options{
+		For: &aksv1alpha1.Gateway{},
+	}); 	err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Gateway")
 		os.Exit(1)
 	}
 	if err = (&controller.PeerReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, ctrl.Options{
+		For: &aksv1alpha1.Peer{},
+	}); 	err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Peer")
 		os.Exit(1)
 	}
