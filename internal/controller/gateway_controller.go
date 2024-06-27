@@ -19,17 +19,17 @@ package controller
 import (
 	"context"
 	"errors"
-	"log"
+	"net"
 	"os"
 
+	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
-	"golang.zx2c4.com/wireguard/wgctrl/config"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 )
 
 // GatewayReconciler reconciles a Gateway object
@@ -55,7 +55,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	//_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
-	log := ctrlLog.FromContext(ctx)
+	log := ctrl.Log
 
 	// Fetch the Gateway instance
 	var gateway v1alpha1.Gateway
@@ -104,20 +104,20 @@ func (r *GatewayReconciler) ensureWireGuardSetup(gateway *v1alpha1.Gateway) erro
 	defer cli.Close()
 
 	// Create a WireGuard configuration
-	cfg := config.Config{
-		Interface: config.Interface{
-			PrivateKey:   gateway.Spec.PrivateKey,
-			ListenPort:   gateway.Spec.ListenPort,
-			ReplacePeers: true,
-		},
-		Peers: []config.Peer{
-			{
-				PublicKey: gateway.Spec.PublicKey,
-				Endpoint:  gateway.Spec.Endpoint,
-			},
-		},
-	}
-
+	// cfg := wgtypes.Config{
+	// 	Interface: config.Interface{
+	// 		PrivateKey:   gateway.Spec.PrivateKey,
+	// 		ListenPort:   gateway.Spec.ListenPort,
+	// 		ReplacePeers: true,
+	// 	},
+	// 	Peers: []config.Peer{
+	// 		{
+	// 			PublicKey: gateway.Spec.PublicKey,
+	// 			Endpoint:  gateway.Spec.Endpoint,
+	// 		},
+	// 	},
+	// }
+	cfg := wgtypes.Config{}
 	if err := cli.ConfigureDevice("wg0", cfg); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func (r *GatewayReconciler) ensureWireGuardSetup(gateway *v1alpha1.Gateway) erro
 		return err
 	}
 
-	log.Printf("WireGuard setup completed for Gateway %s/%s", gateway.Namespace, gateway.Name)
+	log.Log.Info("WireGuard setup completed for Gateway %s/%s", gateway.Namespace, gateway.Name)
 	return nil
 }
 
