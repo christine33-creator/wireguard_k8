@@ -39,8 +39,15 @@ spec:
           spec:
             description: PeerSpec defines the desired state of Peer
             properties:
+              allowedIPs:
+                items:
+                  type: string
+                type: array
               endpoint:
-                description: Endpoint is the network endpoint of the peer
+                type: string
+              meshIP:
+                type: string
+              publicKey:
                 type: string
               podIPs:
                 description: PodIPs is a list of pod IPs associated with the peer

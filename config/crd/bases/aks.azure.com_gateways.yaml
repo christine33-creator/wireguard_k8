@@ -40,8 +40,8 @@ spec:
             description: GatewaySpec defines the desired state of Gateway
             properties:
               endpoint:
-                description: Foo is an example field of Gateway. Edit gateway_types.go
-                  to remove/update
+                type: string
+              publicKey:
                 type: string
               publicKey:
                 type: string
