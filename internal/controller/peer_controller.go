@@ -19,17 +19,17 @@ package controller
 import (
 	"context"
 	"errors"
-	"log"
+	"net"
 	"os"
 
+	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
-	"golang.zx2c4.com/wireguard/wgctrl/config"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 )
 
 // PeerReconciler reconciles a Peer object
@@ -55,7 +55,7 @@ func (r *PeerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	//_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
-	log := ctrlLog.FromContext(ctx)
+	log := ctrl.LoggerFrom(ctx)
 
 	// Fetch the Peer instance
 	var peer v1alpha1.Peer
@@ -73,17 +73,16 @@ func (r *PeerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	//example logic to update the status of the peer
-	peer.Status.Conditions = append(peer.Status.Conditions, metav1.Condition{
-        Type:    "Ready",
-        Status:  metav1.ConditionTrue,
-        Reason:  "Reconciled",
-        Message: "Peer successfully reconciled",
-    })
-
-    if err := r.Status().Update(ctx, &peer); err != nil {
-        log.Error(err, "unable to update Peer status")
-        return ctrl.Result{}, err
-    }
+	// peer.Status.Conditions = append(peer.Status.Conditions, metav1.Condition{
+	// 	Type:    "Ready",
+	// 	Status:  metav1.ConditionTrue,
+	// 	Reason:  "Reconciled",
+	// 	Message: "Peer successfully reconciled",
+	// })
+	if err := r.Status().Update(ctx, &peer); err != nil {
+		log.Error(err, "unable to update Peer status")
+		return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -118,21 +117,21 @@ func (r *PeerReconciler) ensureWireGuardSetup(peer *v1alpha1.Peer) error {
 	defer cli.Close()
 
 	// Create a WireGuard configuration
-	cfg := config.Config{
-		Interface: config.Interface{
-			PrivateKey:   peer.Spec.PrivateKey,
-			ListenPort:   peer.Spec.ListenPort,
-			ReplacePeers: true,
-		},
-		Peers: []config.Peer{
-			{
-				PublicKey: peer.Spec.PublicKey,
-				Endpoint:  peer.Spec.Endpoint,
-				AllowedIPs: peer.Spec.PodIPs,
-			},
-		},
-	}
-
+	// cfg := config.Config{
+	// 	Interface: config.Interface{
+	// 		PrivateKey:   peer.Spec.PrivateKey,
+	// 		ListenPort:   peer.Spec.ListenPort,
+	// 		ReplacePeers: true,
+	// 	},
+	// 	Peers: []config.Peer{
+	// 		{
+	// 			PublicKey:  peer.Spec.PublicKey,
+	// 			Endpoint:   peer.Spec.Endpoint,
+	// 			AllowedIPs: peer.Spec.PodIPs,
+	// 		},
+	// 	},
+	// }
+	cfg := wgtypes.Config{}
 	if err := cli.ConfigureDevice("wg0", cfg); err != nil {
 		return err
 	}
@@ -149,7 +148,7 @@ func (r *PeerReconciler) ensureWireGuardSetup(peer *v1alpha1.Peer) error {
 		return err
 	}
 
-	log.Printf("WireGuard setup completed for Peer %s/%s", peer.Namespace, peer.Name)
+	log.Log.Info("WireGuard setup completed for Peer %s/%s", peer.Namespace, peer.Name)
 	return nil
 }
 
