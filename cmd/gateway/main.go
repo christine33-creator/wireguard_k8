@@ -211,7 +211,6 @@ func main() {
 
 		for _, peer := range peers.Items {
 			if _, ok := peerCache[peer.Spec.PublicKey]; !ok {
-				peerCache[peer.Spec.PublicKey] = peer
 				// add peer to wireguard device
 				cfg := wgtypes.PeerConfig{
 					PublicKey: mustParseKey(peer.Spec.PublicKey),
@@ -239,7 +238,9 @@ func main() {
 				})
 				if err != nil {
 					log.Printf("failed to add peer to wireguard device: %s", err)
+					continue
 				}
+				peerCache[peer.Spec.PublicKey] = peer
 			}
 		}
 	}
