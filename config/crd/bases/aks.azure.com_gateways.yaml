@@ -41,12 +41,18 @@ spec:
             properties:
               endpoint:
                 type: string
-              publicKey:
+              listenPort:
+                type: integer
+              privateKey:
+                description: Foo is an example field of Gateway. Edit gateway_types.go
+                  to remove/update
                 type: string
               publicKey:
                 type: string
             required:
             - endpoint
+            - listenPort
+            - privateKey
             - publicKey
             type: object
           status:

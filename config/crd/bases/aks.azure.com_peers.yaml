@@ -45,23 +45,26 @@ spec:
                 type: array
               endpoint:
                 type: string
+              listenPort:
+                type: integer
               meshIP:
                 type: string
-              publicKey:
-                type: string
               podIPs:
-                description: PodIPs is a list of pod IPs associated with the peer
                 items:
                   type: string
                 type: array
-              publicKey:
+              privateKey:
                 description: |-
                   Foo is an example field of Peer. Edit peer_types.go to remove/update
                   PublicKey is the WireGuard public key of the peer
                 type: string
+              publicKey:
+                type: string
             required:
             - endpoint
+            - listenPort
             - podIPs
+            - privateKey
             - publicKey
             type: object
           status:
