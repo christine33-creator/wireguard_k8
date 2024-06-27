@@ -18,17 +18,17 @@ package controller
 
 import (
 	"context"
-	"errors"
-	"log"
-	"os"
+        "errors"
+        "net"
+        "os"
 
-	"github.com/vishvananda/netlink"
-	"golang.zx2c4.com/wireguard/wgctrl"
-	"golang.zx2c4.com/wireguard/wgctrl/config"
-	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+        v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
+        "github.com/vishvananda/netlink"
+        "golang.zx2c4.com/wireguard/wgctrl"
+        "k8s.io/apimachinery/pkg/runtime"
+        ctrl "sigs.k8s.io/controller-runtime"
+        "sigs.k8s.io/controller-runtime/pkg/client"
+        ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
 	v1alpha1 "github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 )
 
