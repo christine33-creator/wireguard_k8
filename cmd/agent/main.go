@@ -9,25 +9,25 @@ import (
 	"strings"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/runtime"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	_ "k8s.io/client-go/plugin/pkg/client/auth" 
 )
 
 func main() {
 	/*
-	TODO:
-		- ensure I have a wireguard interface
-		- ensure I am peered with the gateways
-		- ensure I create a Peer resource in the k8s cluster that has:
-			- my public key
-			- my pod IPs
-			- my reachable endpoint (just node ip)
+		TODO:
+			- ensure I have a wireguard interface
+			- ensure I am peered with the gateways
+			- ensure I create a Peer resource in the k8s cluster that has:
+				- my public key
+				- my pod IPs
+				- my reachable endpoint (just node ip)
 	*/
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()

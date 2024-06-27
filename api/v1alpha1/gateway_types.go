@@ -30,9 +30,9 @@ type GatewaySpec struct {
 
 	// Foo is an example field of Gateway. Edit gateway_types.go to remove/update
 	PrivateKey string `json:"privateKey"`
-        ListenPort int    `json:"listenPort"`
-        PublicKey  string `json:"publicKey"`
-        Endpoint   string `json:"endpoint"`
+	ListenPort int    `json:"listenPort"`
+	PublicKey  string `json:"publicKey"`
+	Endpoint   string `json:"endpoint"`
 }
 
 // GatewayStatus defines the observed state of Gateway

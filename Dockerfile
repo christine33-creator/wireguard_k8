@@ -23,6 +23,7 @@ FROM alpine:latest
 # Install necessary packages
 RUN apk update && \
     apk add --no-cache \
+    curl \
     iptables \
     wireguard-tools
 
