@@ -15,6 +15,7 @@ COPY . .
 
 # Build the Go application
 RUN go build -o gateway ./cmd/gateway
+RUN go build -o agent ./cmd/agent
 
 # Use a minimal base image for the final container
 FROM alpine:latest
@@ -30,3 +31,4 @@ WORKDIR /app
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/gateway /app/gateway
+COPY --from=builder /app/agent /app/agent
