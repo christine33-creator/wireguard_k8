@@ -1,122 +1,162 @@
 package main
 
 import (
-	"context"
+	""context"
 	"fmt"
 	"log"
-	"os/exec"
-	"path/filepath"
-	"strings"
+	"net"
+	"os"
+	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
+	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
+var scheme = runtime.NewScheme()
+
+func init() {
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+}
+
+type WireGuard struct {
+	Attributes *netlink.LinkAttrs
+}
+
+func (w *WireGuard) Attrs() *netlink.LinkAttrs {
+	return w.Attributes
+}
+
+func (w *WireGuard) Type() string {
+	return "wireguard"
+}
+
+var _ netlink.Link = &WireGuard{}
+
 func main() {
-	/*
-		TODO:
-			- ensure I have a wireguard interface
-			- ensure I am peered with the gateways
-			- ensure I create a Peer resource in the k8s cluster that has:
-				- my public key
-				- my pod IPs
-				- my reachable endpoint (just node ip)
-	*/
+	fmt.Println("Starting WireGuard agent setup...")
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()
 	createPeerResource()
 	fmt.Println("Completed setup.")
+
+	for {
+		time.Sleep(2 * time.Second)
+		ensurePeeringWithGateways()
+	}
 }
 
-func runCommand(cmd string) (string, error) {
-	out, err := exec.Command("sh", "-c", cmd).Output()
-	return string(out), err
+// func to retrieve node ip dymnamically
+func getNodeIPAddress() string {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		log.Fatalf("Error creating in-cluster config: %v", err)
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Error creating Kubernetes client: %v", err)
+	}
+
+	hostname := os.Getenv("minikube") // Retrieve the node name
+	node, err := clientset.CoreV1().Nodes().Get(context.TODO(), hostname, metav1.GetOptions{})
+	if err != nil {
+		log.Fatalf("Error getting node %s: %v", hostname, err)
+	}
+
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == v1.NodeInternalIP {
+			return addr.Address
+		}
+	}
+
+	log.Fatalf("Node internal IP not found for node %s", hostname)
+	return ""
 }
 
 func ensureWireGuardInterface() {
 	fmt.Println("Ensuring WireGuard interface...")
 
-	cmd := "ip link show dev wg0"
-	_, err := runCommand(cmd)
-	if err != nil {
-		fmt.Println("Creating WireGuard interface...")
-		cmd = "ip link add dev wg0 type wireguard"
-		_, err = runCommand(cmd)
-		if err != nil {
-			fmt.Println("Error creating WireGuard interface: ", err)
-			return
-		}
+	la := netlink.NewLinkAttrs()
+	la.Name = "wg0"
+	wgLink := &WireGuard{Attributes: &la}
 
-		// Configure the WireGuard interface
-		cmd = "ip address add dev wg0 your_ip_address/24"
-		_, err = runCommand(cmd)
-		if err != nil {
-			fmt.Println("Error adding IP address to WireGuard interface: ", err)
-			return
-		}
-
-		// Bring up the WireGuard interface
-		cmd = "ip link set up dev wg0"
-		_, err = runCommand(cmd)
-		if err != nil {
-			fmt.Println("Error bringing up WireGuard interface: ", err)
-			return
-		}
-
-		// Add WireGuard configuration here (if needed)
-		fmt.Println("WireGuard interface created and configured.")
-	} else {
-		fmt.Println("WireGuard interface already exists.")
+	err := netlink.LinkAdd(wgLink)
+	if err != nil && err.Error() != "file exists" {
+		log.Fatalf("Error creating WireGuard interface: %v", err)
 	}
+
+	link, err := netlink.LinkByName("wg0")
+	if err != nil {
+		log.Fatalf("Error getting WireGuard interface: %v", err)
+	}
+
+	nodeIP := getNodeIPAddress()
+	addr := &netlink.Addr{
+		IPNet: &net.IPNet{
+			IP:   net.ParseIP(nodeIP), //should it be a specific IP?
+			Mask: net.CIDRMask(24, 32),
+		},
+	}
+	err = netlink.AddrAdd(link, addr)
+	if err != nil && err.Error() != "file exists" {
+		log.Fatalf("Error adding IP address to WireGuard interface: %v", err)
+	}
+
+	err = netlink.LinkSetUp(link)
+	if err != nil {
+		log.Fatalf("Error bringing up WireGuard interface: %v", err)
+	}
+
+	fmt.Println("WireGuard interface created and configured.")
 }
 
 func ensurePeeringWithGateways() {
 	fmt.Println("Ensuring peering with gateways...")
 
-	// Load kubeconfig
-	var kubeconfig string
-	if home := homedir.HomeDir(); home != "" {
-		kubeconfig = filepath.Join(home, ".kube", "config")
-	} else {
-		log.Fatalf("Unable to find kubeconfig")
-	}
-
-	// Build the client config
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		log.Fatalf("Error building kubeconfig: %v", err)
-	}
-
-	// Create the client
-	scheme := runtime.NewScheme()
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
-		log.Fatalf("Error adding Gateway schema to scheme: %v", err)
-	}
-
-	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
+	k8sClient, err := createK8sClient()
 	if err != nil {
 		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
 
-	// Fetch Gateway list
 	var gatewayList v1alpha1.GatewayList
-	if err := k8sClient.List(context.Background(), &gatewayList, &client.ListOptions{}); err != nil {
+	if err := k8sClient.List(context.Background(), &gatewayList); err != nil {
 		log.Fatalf("Error fetching Gateways: %v", err)
 	}
 
-	// Process each gateway and configure peering
+	cli, err := wgctrl.New()
+	if err != nil {
+		log.Fatalf("Error creating WireGuard client: %v", err)
+	}
+	defer cli.Close()
+
+	wgdev, err := cli.Device("wg0")
+	if err != nil {
+		log.Fatalf("Error getting WireGuard device: %v", err)
+	}
+
 	for _, gateway := range gatewayList.Items {
 		fmt.Printf("Configuring peering with gateway: %s (Endpoint: %s, PublicKey: %s)\n", gateway.Name, gateway.Spec.Endpoint, gateway.Spec.PublicKey)
 
-		// Add your WireGuard peering logic here using the gateway.Spec.Endpoint and gateway.Spec.PublicKey
-		_, err := runCommand(fmt.Sprintf("wg set wg0 peer %s endpoint %s", gateway.Spec.PublicKey, gateway.Spec.Endpoint))
+		cfg := wgtypes.PeerConfig{
+			PublicKey: mustParseKey(gateway.Spec.PublicKey),
+			Endpoint:  &net.UDPAddr{IP: net.ParseIP(gateway.Spec.Endpoint), Port: 51820},
+		}
+
+		err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
+			Peers:        []wgtypes.PeerConfig{cfg},
+			ReplacePeers: false,
+		})
 		if err != nil {
 			log.Fatalf("Error configuring peering with gateway %s: %v", gateway.Name, err)
 		}
@@ -128,70 +168,38 @@ func ensurePeeringWithGateways() {
 func createPeerResource() {
 	fmt.Println("Creating Peer resource...")
 
-	// Load kubeconfig
-	var kubeconfig string
-	if home := homedir.HomeDir(); home != "" {
-		kubeconfig = filepath.Join(home, ".kube", "config")
-	} else {
-		log.Fatalf("Unable to find kubeconfig")
-	}
-
-	// Build the client config
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		log.Fatalf("Error building kubeconfig: %v", err)
-	}
-
-	// Create the clientset
-	clientset, err := kubernetes.NewForConfig(config)
+	k8sClient, err := createK8sClient()
 	if err != nil {
 		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
 
-	// Retrieve node IP
-	nodeName, err := getNodeName()
+	nodeName, err := os.Hostname()
 	if err != nil {
 		log.Fatalf("Error getting node name: %v", err)
 	}
 
-	nodeIP, err := getNodeIP(clientset, nodeName)
+	nodeIP, err := getNodeIP(k8sClient, nodeName)
 	if err != nil {
 		log.Fatalf("Error getting node IP: %v", err)
 	}
 
-	// Retrieve pod IPs
-	podIPs, err := getPodIPs(clientset, nodeName)
-	if err != nil {
-		log.Fatalf("Error getting pod IPs: %v", err)
-	}
-
-	// Retrieve WireGuard public key
 	publicKey, err := getWireGuardPublicKey()
 	if err != nil {
 		log.Fatalf("Error getting WireGuard public key: %v", err)
 	}
 
-	// Define the Peer resource
 	peer := &v1alpha1.Peer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "my-peer",
 		},
 		Spec: v1alpha1.PeerSpec{
 			PublicKey: publicKey,
-			PodIPs:    podIPs,
+			PodIPs:    []string{nodeIP},
 			Endpoint:  nodeIP,
 		},
 	}
 
-	// Create the Peer resource
-	_, err = clientset.CoreV1().RESTClient().
-		Post().
-		Namespace("default").
-		Resource("peers").
-		Body(peer).
-		Do(context.Background()).
-		Get()
-
+	err = k8sClient.Create(context.Background(), peer)
 	if err != nil {
 		log.Fatalf("Error creating Peer resource: %v", err)
 	}
@@ -199,17 +207,18 @@ func createPeerResource() {
 	fmt.Println("Peer resource created successfully.")
 }
 
-func getNodeName() (string, error) {
-	cmd := "hostname"
-	nodeName, err := runCommand(cmd)
+func createK8sClient() (client.Client, error) {
+	cfg, err := config.GetConfig()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return strings.TrimSpace(nodeName), nil
+
+	return client.New(cfg, client.Options{Scheme: scheme})
 }
 
-func getNodeIP(clientset *kubernetes.Clientset, nodeName string) (string, error) {
-	node, err := clientset.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+func getNodeIP(k8sClient client.Client, nodeName string) (string, error) {
+	node := &v1.Node{}
+	err := k8sClient.Get(context.Background(), client.ObjectKey{Name: nodeName}, node)
 	if err != nil {
 		return "", err
 	}
@@ -223,27 +232,18 @@ func getNodeIP(clientset *kubernetes.Clientset, nodeName string) (string, error)
 	return "", fmt.Errorf("node internal IP not found")
 }
 
-func getPodIPs(clientset *kubernetes.Clientset, nodeName string) ([]string, error) {
-	podList, err := clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodeName),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var podIPs []string
-	for _, pod := range podList.Items {
-		podIPs = append(podIPs, pod.Status.PodIP)
-	}
-
-	return podIPs, nil
-}
-
 func getWireGuardPublicKey() (string, error) {
-	cmd := "cat /etc/wireguard/publickey"
-	publicKey, err := runCommand(cmd)
+	key, err := os.ReadFile("/etc/wireguard/publickey")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(publicKey), nil
+	return string(key), nil
+}
+
+func mustParseKey(s string) wgtypes.Key {
+	k, err := wgtypes.ParseKey(s)
+	if err != nil {
+		panic(err)
+	}
+	return k
 }
