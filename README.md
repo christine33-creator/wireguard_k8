@@ -92,7 +92,7 @@ Create `peer` and `gateway` CRDs to define the mesh topology.
       - Check for sufficient resource allocation (CPU, memory).
       - Inspect container logs for error messages.
  
-2.** Network Connectivity Issues**
+2. **Network Connectivity Issues**
    - **Error: Unable to establish WireGuard connections**
       - Verify WireGuard interface configuration (address, port, peers).
       - Check firewall rules to allow WireGuard traffic.
@@ -107,7 +107,7 @@ Create `peer` and `gateway` CRDs to define the mesh topology.
    - **Error: Invalid Peer or Gateway configuration**
       - Validate custom resource definitions against the schema.
       - Check for typos or incorrect values in configuration files.
-      - Verify the specified endpoints and public keys.
+      - Verify the specified endpoints and public keys.  
    **- Error: Incorrect WireGuard configuration**
       - Review WireGuard configuration files for errors.
       - Ensure correct peer addresses and public keys.
