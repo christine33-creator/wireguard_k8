@@ -33,3 +33,12 @@ WORKDIR /app
 # Copy the binary from the builder stage
 COPY --from=builder /app/gateway /app/gateway
 COPY --from=builder /app/agent /app/agent
+
+# Copy the script to run both applications
+COPY run.sh /app/run.sh
+
+# Make the script executable
+RUN chmod +x /app/run.sh
+
+# Set the entrypoint to the script
+ENTRYPOINT ["/app/run.sh"]
