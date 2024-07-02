@@ -41,17 +41,17 @@ AKS Mesh establishes a mesh network by:
 
 ## Installation
 
-**1. Clone the repo:**
+**1. Clone the repo:**  
 `git clone https://github.com/christine33-creator/wireguard_k8
 cd aks-mesh`
 
-**2. Build and push the Docker image**
+**2. Build and push the Docker image**  
 `docker build --platform="linux/amd64" -t <container-name> --push .`
 
-**3. Deploy the CRDs**
+**3. Deploy the CRDs**  
 `kubectl apply -f config/crd/bases`
 
-**4. (Test) Run Docker container in k8 cluster**
+**4. (Test) Run Docker container in k8 cluster**  
 `sudo docker run --privileged --device /dev/net/tun --cap-add=NET_ADMIN --cap-add=SYS_MODULE --security-opt seccomp=unconfined
 -v /path/to/.kube/config
 -e KUBECONFIG=/root/.kube/config
@@ -61,7 +61,7 @@ cd aks-mesh`
 -e POD_IP=$(hostname -i)
 <docker-image-created>`
 
-**5. Deploy the application in the cluster**
+**5. Deploy the application in the cluster**  
 `kubectl create deployment <deployment-name> --image=<image-name>`
 
 
@@ -78,8 +78,8 @@ Create `peer` and `gateway` CRDs to define the mesh topology.
 
 ### Common Issues and Solutions
 
-**1. Installation and deployment issues
-   - Error: Failed to build Docker image**
+1. **Installation and deployment issues**
+   - **Error: Failed to build Docker image**
       - Check the Dockerfile for syntax errors or missing dependencies.
       - Verify the Docker daemon is running and accessible.
       - Ensure sufficient disk space and resources are available.
@@ -92,8 +92,8 @@ Create `peer` and `gateway` CRDs to define the mesh topology.
       - Check for sufficient resource allocation (CPU, memory).
       - Inspect container logs for error messages.
  
-**2. Network Connectivity Issues
-   - Error: Unable to establish WireGuard connections**
+2.** Network Connectivity Issues**
+   - **Error: Unable to establish WireGuard connections**
       - Verify WireGuard interface configuration (address, port, peers).
       - Check firewall rules to allow WireGuard traffic.
       - Inspect WireGuard logs for error messages.
@@ -103,8 +103,8 @@ Create `peer` and `gateway` CRDs to define the mesh topology.
       - Verify Pod network namespaces and IP addresses.
       - Inspect Kubernetes network policies for restrictions.
 
-**3. Configuration Issues
-   - Error: Invalid Peer or Gateway configuration**
+3. **Configuration Issues**
+   - **Error: Invalid Peer or Gateway configuration**
       - Validate custom resource definitions against the schema.
       - Check for typos or incorrect values in configuration files.
       - Verify the specified endpoints and public keys.
