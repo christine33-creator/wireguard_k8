@@ -52,13 +52,13 @@ cd aks-mesh`
 `kubectl apply -f config/crd/bases`
 
 **4. (Test) Run Docker container in k8 cluster**  
-`sudo docker run --privileged --device /dev/net/tun --cap-add=NET_ADMIN --cap-add=SYS_MODULE --security-opt seccomp=unconfined
--v /path/to/.kube/config
--e KUBECONFIG=/root/.kube/config
--e POD_CIDR=$(hostname -i)
--e KUBECONFIG_SERVICE_HOST=<your-service-host>
--e KUBERNETES_SERVICE_PORT=443
--e POD_IP=$(hostname -i)
+`sudo docker run --privileged --device /dev/net/tun --cap-add=NET_ADMIN --cap-add=SYS_MODULE --security-opt seccomp=unconfined  
+-v /path/to/.kube/config  
+-e KUBECONFIG=/root/.kube/config  
+-e POD_CIDR=$(hostname -i)  
+-e KUBECONFIG_SERVICE_HOST=<your-service-host>  
+-e KUBERNETES_SERVICE_PORT=443  
+-e POD_IP=$(hostname -i)  
 <docker-image-created>`
 
 **5. Deploy the application in the cluster**  
