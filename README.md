@@ -22,7 +22,9 @@ AKS Mesh establishes a mesh network by:
 
 - **Gateway Service**: Handles incoming traffic from Konnectivity agents and forwards it to the appropriate nodes.
 - **Node Agent**: Runs on each node to manage WireGuard connections and peer relationships.
-<insert diagram here>
+
+![image](https://github.com/christine33-creator/wireguard_k8/assets/119143674/2a2b0ea3-6d12-4c0a-8c3e-4be7cfc22eec)
+
 
 ### Benefits
 
