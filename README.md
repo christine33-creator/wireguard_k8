@@ -1,129 +1,115 @@
-# wireguard_K8 (WIP)
-Official Repo for intern project: Replacing Konnectivity agent with Wireguard 
+# AKS Mesh: A WireGuard-based Kubernetes CNI
 
-Downsides to konnectiivty:
+**AKS Mesh** creates a secure, encrypted VPN communication mesh within a Kubernetes cluster using WireGuard. By leveraging Konnectivity and operating in host-network mode, it offers enhanced flexibility and performance while maintaining compatibility with existing setups.
 
-can be flaky - try and look for a query or IcMs where we can't get logs because of a tunnel down or we have to put it into hostNetwork 
+### Understanding Wireguard and Konnectivity
 
-doesn't run in host network
+**WireGuard** is a modern, open-source VPN technology known for its simplicity, fast performance, and strong security. It uses state-of-the-art cryptography and efficient algorithms to establish secure tunnels between endpoints.
 
-still proxies everything through the pods
+**Konnectivity** is a Kubernetes network plugin that provides network connectivity for Pods without relying on traditional CNI plugins. It allows Pods to communicate directly with services and other Pods, even when they are not in the same network namespace.
 
-WireGuard:
+**AKS Mesh** combines these technologies to create a highly performant and secure overlay network within a Kubernetes cluster.
 
-create a mesh of all nodes
-allows other peers to connect
-sell as a private cluster v3
+### How it works
 
-## Implement a wireguard gateway pod to route traffic to
-### Proposed solution: 
-The critical steps include setting up WireGuard on all relevant nodes, configuring routing tables to direct traffic through the VPN, and updating the API server configuration to bind to the WireGuard IP.
+AKS Mesh establishes a mesh network by:
 
-### Choosing a node to act as wireguard gateway and label it using node selector
-```
-$ kubectl label node <node-name> wireguard-gateway=true
-```
+1. Deploying WireGuard gateways as sidecars with Konnectivity agents.
+2. Creating WireGuard interfaces on each node for secure communication.
+3. Managing peer relationships through custom Kubernetes resources.
+   
+**Key Components**:
 
-### Create a wireguard pod or deployment with node affinity to ensure the WireGuard pod runs on the labeled node. 
-The spec of the wireguard pod looks like the following:
-```spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: wireguard-gateway
-                operator: In
-                values:
-                - "true"
-```
-Apply the YAML config file
-```
-$ kubectl apply -f wireguard-pod.yaml
-```
+- **Gateway Service**: Handles incoming traffic from Konnectivity agents and forwards it to the appropriate nodes.
+- **Node Agent**: Runs on each node to manage WireGuard connections and peer relationships.
+<insert diagram here>
 
-### Generate public and private key on the gateway node
-Create a YAML file for the Kubernetes Job that generates the keys and stores them in a Secret. The file is called ```wireguard-keygen.yaml```. To do the same on other nodes, label the nodes and update job YAML
-```
-$ kubectl label node <node-name> wireguard-keygen=true
-```
-Applying the job
-```
-$ kubectl apply -f wireguard-keygen.yaml
-```
+### Benefits
 
-### Retrieving the keys
-Once the Job completes, the keys will be stored in a Kubernetes Secret named ```wireguard-keys``` in the lambda namespace.
-```
-$ kubectl get secret wireguard-keys -n <namespace> -o yaml
-```
-Extract the keys
-```
-$ kubectl get secret wireguard-keys -n lambda -o jsonpath='{.data.privatekey}' | base64 --decode
-$ kubectl get secret wireguard-keys -n lambda -o jsonpath='{.data.publickey}' | base64 --decode
-```
+- **Secure communication**: Encrypted VPN tunnels using WireGuard.
+- **Host-network mode**: Enhanced performance and flexibility.
+- **Konnectivity integration**: Leveraging existing benefits and compatibility.
+- **Kubernetes-native management**: Using custom resources for configuration.
 
-### Configmap for Wireguard configuration
-Create a configmap that contains the Wireguard configuration
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: wireguard-config
-  namespace: lambda
-data:
-  wg0.conf: |
-    [Interface]
-    PrivateKey = <APIServerPrivateKey>
-    Address = <APIServerWireGuardIP>/24
-    ListenPort = 51820
+## Getting Started
 
-    [Peer]
-    PublicKey = <GatewayPublicKey>
-    AllowedIPs = 0.0.0.0/0
-    Endpoint = <GatewayPublicIP>:51820
-    PersistentKeepalive = 25
-```
-Simiarly, repeat the same process for the api-server wg config. Ensure that wireguard pod mounts to this config file. Apply the configmap YAML file.
-```
-$ kubectl apply -f wireguard-configmap.yaml
-$ kubectl apply -f wireguard-pod.yaml
-```
+## Prerequisites
 
-### Enable ip-forwarding on the gateway node and the api-server node
-```
-$ sudo sysctl -w net.ipv4.ip_forward=1
-```
-Start Wireguard interface on gateway node and API server node
-```
-$ sudo wg-quick up wg0
-```
+- Kubernetes cluster
+- Docker
+- kubectl configured
 
-### Configure routing
-Update routing table on each node to ensure that the API server node routes traffic for the cluster network through the WireGuard interface. 
-```
-$ sudo ip route add <ClusterCIDR> via <GatewayWireGuardIP>
-```
+## Installation
 
-### Update API server configuration
-Edit the API server manifest file, at ```/etc/kubernetes/manifests/kube-apiserver.yaml```, to include the WireGuard IP in the ```--advertise-address``` and ```--bind-address flags```.
-```
-spec:
-  containers:
-  - name: kube-apiserver
-    command:
-    - kube-apiserver
-    - --advertise-address=<APIServerWireGuardIP>
-    - --bind-address=<APIServerWireGuardIP>
-    # other flags...
-```
+**1. Clone the repo:**
+`git clone https://github.com/christine33-creator/wireguard_k8
+cd aks-mesh`
 
-On each worker node, ensure that traffic to the API server IP is routed through the WireGuard interface.
-```
-$ sudo ip route add <APIServerClusterIP> via <GatewayWireGuardIP>
-```
+**2. Build and push the Docker image**
+`docker build --platform="linux/amd64" -t <container-name> --push .`
 
-### Restart Kubernetes components
-```
-$ sudo systemctl restart kube-apiserver
-```
+**3. Deploy the CRDs**
+`kubectl apply -f config/crd/bases`
+
+**4. (Test) Run Docker container in k8 cluster**
+`sudo docker run --privileged --device /dev/net/tun --cap-add=NET_ADMIN --cap-add=SYS_MODULE --security-opt seccomp=unconfined
+-v /path/to/.kube/config
+-e KUBECONFIG=/root/.kube/config
+-e POD_CIDR=$(hostname -i)
+-e KUBECONFIG_SERVICE_HOST=<your-service-host>
+-e KUBERNETES_SERVICE_PORT=443
+-e POD_IP=$(hostname -i)
+<docker-image-created>`
+
+**5. Deploy the application in the cluster**
+`kubectl create deployment <deployment-name> --image=<image-name>`
+
+
+## Configuration
+
+Create `peer` and `gateway` CRDs to define the mesh topology.
+
+## Use Cases
+
+- **Secure communication between applications**: Establish secure connections between applications running in different Pods or namespaces.
+- **Service mesh integration**: Integrate with service mesh solutions for additional traffic management and security features.
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+**1. Installation and deployment issues
+   - Error: Failed to build Docker image**
+      - Check the Dockerfile for syntax errors or missing dependencies.
+      - Verify the Docker daemon is running and accessible.
+      - Ensure sufficient disk space and resources are available.
+   - **Error: Failed to deploy CRDs**
+      - Verify the Kubernetes cluster is accessible and the kubectl configuration is correct.
+      - Check for syntax errors in the CRD manifests.
+      - Ensure the Kubernetes API server supports custom resource definitions.
+   - **Error: Failed to deploy agent**
+      - Verify Docker image permissions and container capabilities.
+      - Check for sufficient resource allocation (CPU, memory).
+      - Inspect container logs for error messages.
+ 
+**2. Network Connectivity Issues
+   - Error: Unable to establish WireGuard connections**
+      - Verify WireGuard interface configuration (address, port, peers).
+      - Check firewall rules to allow WireGuard traffic.
+      - Inspect WireGuard logs for error messages.
+      - Verify network connectivity between nodes.
+   - **Error: Connectivity issues between Pods**
+      - Check Konnectivity agent configuration and network policies.
+      - Verify Pod network namespaces and IP addresses.
+      - Inspect Kubernetes network policies for restrictions.
+
+**3. Configuration Issues
+   - Error: Invalid Peer or Gateway configuration**
+      - Validate custom resource definitions against the schema.
+      - Check for typos or incorrect values in configuration files.
+      - Verify the specified endpoints and public keys.
+   **- Error: Incorrect WireGuard configuration**
+      - Review WireGuard configuration files for errors.
+      - Ensure correct peer addresses and public keys.
+      - Check for missing or incorrect firewall rules.
+
