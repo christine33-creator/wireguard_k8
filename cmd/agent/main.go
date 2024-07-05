@@ -43,8 +43,8 @@ func (w *WireGuard) Type() string {
 var _ netlink.Link = &WireGuard{}
 
 func main() {
-	kubeconfig := os.Getenv("/path/to/kubeconfig")
-	os.Setenv("KUBECONFIG", kubeconfig)
+	//kubeconfig := os.Getenv("/path/to/kubeconfig")
+	//os.Setenv("KUBECONFIG", kubeconfig)
 	fmt.Println("Starting WireGuard agent setup...")
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()
