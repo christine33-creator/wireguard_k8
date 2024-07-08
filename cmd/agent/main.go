@@ -17,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -43,8 +43,6 @@ func (w *WireGuard) Type() string {
 var _ netlink.Link = &WireGuard{}
 
 func main() {
-	//kubeconfig := os.Getenv("/path/to/kubeconfig")
-	//os.Setenv("KUBECONFIG", kubeconfig)
 	fmt.Println("Starting WireGuard agent setup...")
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()
@@ -57,16 +55,11 @@ func main() {
 	}
 }
 
-// func to retrieve node ip dynamically
+// func to retrieve node IP dynamically
 func getNodeIPAddress() string {
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		log.Fatalf("KUBECONFIG environment variable is not set")
-	}
-
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	config, err := rest.InClusterConfig()
 	if err != nil {
-		log.Fatalf("Error creating config from kubeconfig: %v", err)
+		log.Fatalf("Error creating in-cluster config: %v", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
@@ -214,12 +207,7 @@ func createPeerResource() {
 }
 
 func createK8sClient() (client.Client, error) {
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		return nil, fmt.Errorf("KUBECONFIG environment variable is not set")
-	}
-
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
 	}
