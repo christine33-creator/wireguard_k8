@@ -24,3 +24,6 @@ rules:
   - apiGroups: ["aks.azure.com"]
     resources: ["peers/status"]
     verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "update", "get", "list", "watch"]
