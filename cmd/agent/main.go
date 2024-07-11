@@ -13,6 +13,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -44,9 +45,11 @@ var _ netlink.Link = &WireGuard{}
 
 func main() {
 	fmt.Println("Starting WireGuard agent setup...")
+
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()
 	createPeerResource()
+
 	fmt.Println("Completed setup.")
 
 	for {
@@ -55,8 +58,7 @@ func main() {
 	}
 }
 
-// func to retrieve node IP dynamically
-func getNodeIPAddress() string {
+func getNodeIPAddress(k8sClient kubernetes.Interface) string {
 	hostname := os.Getenv("NODE_NAME") // Retrieve the node name from the environment variable
 	if hostname == "" {
 		log.Fatalf("NODE_NAME environment variable is not set")
@@ -111,6 +113,7 @@ func ensureWireGuardInterface() {
 			Mask: net.CIDRMask(24, 32),
 		},
 	}
+
 	err = netlink.AddrAdd(link, addr)
 	if err != nil && err.Error() != "file exists" {
 		log.Fatalf("Error adding IP address to WireGuard interface: %v", err)
@@ -174,7 +177,7 @@ func ensurePeeringWithGateways() {
 }
 
 func createPeerResource() {
-	fmt.Println("Creating Peer resource 1...")
+	fmt.Println("Creating or updating Peer resource...")
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -201,9 +204,11 @@ func createPeerResource() {
 		log.Fatalf("Error getting WireGuard keys: %v", err)
 	}
 
+	peerName := fmt.Sprintf("peer-%s", nodeName)
+
 	peer := &v1alpha1.Peer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-peer",
+			Name:      peerName,
 			Namespace: "kube-system",
 		},
 		Spec: v1alpha1.PeerSpec{
@@ -215,13 +220,33 @@ func createPeerResource() {
 
 	err = k8sClient.Create(context.Background(), peer)
 	if err != nil {
-		log.Fatalf("Error creating Peer resource: %v", err)
-	}
+		if errors.IsAlreadyExists(err) {
+			fmt.Println("Peer resource already exists, updating...")
+			existingPeer := &v1alpha1.Peer{}
+			err = k8sClient.Get(context.Background(), client.ObjectKey{Name: peerName, Namespace: "kube-system"}, existingPeer)
+			if err != nil {
+				log.Fatalf("Error getting existing Peer resource: %v", err)
+			}
 
-	fmt.Println("Peer resource created successfully.")
+			existingPeer.Spec.PublicKey = publicKey
+			existingPeer.Spec.PodIPs = []string{nodeIP}
+			existingPeer.Spec.Endpoint = nodeIP
+
+			err = k8sClient.Update(context.Background(), existingPeer)
+			if err != nil {
+				log.Fatalf("Error updating existing Peer resource: %v", err)
+			}
+
+			fmt.Println("Peer resource updated successfully.")
+		} else {
+			log.Fatalf("Error creating Peer resource: %v", err)
+		}
+	} else {
+		fmt.Println("Peer resource created successfully.")
+	}
 }
 
-func createK8sClient() (client.Client, error) {
+func createK8sClient() (kubernetes.Interface, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
@@ -282,7 +307,6 @@ func updateConfigMapWithPublicKey(clientset *kubernetes.Clientset, publicKey str
 	if cm.Data == nil {
 		cm.Data = make(map[string]string)
 	}
-
 	cm.Data[nodeName] = publicKey
 
 	_, err = clientset.CoreV1().ConfigMaps("kube-system").Update(context.Background(), cm, metav1.UpdateOptions{})
