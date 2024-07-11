@@ -34,11 +34,8 @@ WORKDIR /app
 COPY --from=builder /app/gateway /app/gateway
 COPY --from=builder /app/agent /app/agent
 
-# Copy the script to run both applications
-COPY run.sh /app/run.sh
+# Expose necessary ports (optional)
+EXPOSE 51820
 
-# Make the script executable
-RUN chmod +x /app/run.sh
-
-# Set the entrypoint to the script
-ENTRYPOINT ["/app/run.sh"]
+# Default command
+CMD ["/app/gateway"]
