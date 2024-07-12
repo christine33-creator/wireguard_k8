@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
+	"github.com/t-chdossa_microsoft/aks-mesh/pkg/acn"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -194,14 +196,32 @@ func createPeerResource() {
 		log.Fatalf("Error getting WireGuard public key: %v", err)
 	}
 
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		log.Fatalf("Error creating in-cluster config: %s", err)
+	}
+	nncCli := acn.NewNncClient(cfg)
+
+	nnc, err := nncCli.GetNnc(nodeName)
+	if err != nil {
+		log.Fatalf("Error getting NodeNetworkConfig: %v", err)
+	}
+
+	if len(nnc.Status.NetworkContainers) == 0 {
+		log.Fatalf("No network containers found in NodeNetworkConfig %v", nnc)
+	}
+
+	primaryIP := nnc.Status.NetworkContainers[0].PrimaryIP
+
 	peer := &v1alpha1.Peer{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "my-peer",
 		},
 		Spec: v1alpha1.PeerSpec{
-			PublicKey: publicKey,
-			PodIPs:    []string{nodeIP},
-			Endpoint:  nodeIP,
+			PublicKey:  publicKey,
+			PodIPs:     []string{nodeIP},
+			Endpoint:   nodeIP,
+			AllowedIPs: []string{primaryIP},
 		},
 	}
 
