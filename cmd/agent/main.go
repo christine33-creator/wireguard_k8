@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
+	"github.com/t-chdossa_microsoft/aks-mesh/pkg/acn"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -58,13 +59,20 @@ func main() {
 	}
 }
 
-func getNodeIPAddress(k8sClient kubernetes.Interface) string {
-	hostname := os.Getenv("NODE_NAME") // Retrieve the node name from the environment variable
-	if hostname == "" {
-		log.Fatalf("NODE_NAME environment variable is not set")
+// func to retrieve node ip dynamically
+func getNodeIPAddress() string {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		log.Fatalf("Error creating in-cluster config: %v", err)
 	}
 
-	node, err := k8sClient.CoreV1().Nodes().Get(context.TODO(), hostname, metav1.GetOptions{})
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		log.Fatalf("Error creating Kubernetes client: %v", err)
+	}
+
+	hostname := os.Getenv("NODE_NAME") // Retrieve the node name
+	node, err := clientset.CoreV1().Nodes().Get(context.TODO(), hostname, metav1.GetOptions{})
 	if err != nil {
 		log.Fatalf("Error getting node %s: %v", hostname, err)
 	}
@@ -96,24 +104,13 @@ func ensureWireGuardInterface() {
 		log.Fatalf("Error getting WireGuard interface: %v", err)
 	}
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		log.Fatalf("Error creating in-cluster config: %v", err)
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		log.Fatalf("Error creating Kubernetes client: %v", err)
-	}
-
-	nodeIP := getNodeIPAddress(clientset)
+	nodeIP := getNodeIPAddress()
 	addr := &netlink.Addr{
 		IPNet: &net.IPNet{
 			IP:   net.ParseIP(nodeIP),
 			Mask: net.CIDRMask(24, 32),
 		},
 	}
-
 	err = netlink.AddrAdd(link, addr)
 	if err != nil && err.Error() != "file exists" {
 		log.Fatalf("Error adding IP address to WireGuard interface: %v", err)
@@ -177,14 +174,9 @@ func ensurePeeringWithGateways() {
 }
 
 func createPeerResource() {
-	fmt.Println("Creating or updating Peer resource...")
+	fmt.Println("Creating Peer resource...")
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		log.Fatalf("Error creating in-cluster config: %v", err)
-	}
-
-	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
+	k8sClient, err := createK8sClient()
 	if err != nil {
 		log.Fatalf("Error creating Kubernetes client: %v", err)
 	}
@@ -204,6 +196,22 @@ func createPeerResource() {
 		log.Fatalf("Error getting WireGuard keys: %v", err)
 	}
 
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		log.Fatalf("Error creating in-cluster config: %s", err)
+	}
+	nncCli := acn.NewNncClient(cfg)
+
+	nnc, err := nncCli.GetNnc(nodeName)
+	if err != nil {
+		log.Fatalf("Error getting NodeNetworkConfig: %v", err)
+	}
+
+	if len(nnc.Status.NetworkContainers) == 0 {
+		log.Fatalf("No network containers found in NodeNetworkConfig %v", nnc)
+	}
+
+	primaryIP := nnc.Status.NetworkContainers[0].PrimaryIP
 	peerName := fmt.Sprintf("peer-%s", nodeName)
 
 	peer := &v1alpha1.Peer{
@@ -212,9 +220,10 @@ func createPeerResource() {
 			Namespace: "kube-system",
 		},
 		Spec: v1alpha1.PeerSpec{
-			PublicKey: publicKey,
-			PodIPs:    []string{nodeIP},
-			Endpoint:  nodeIP,
+			PublicKey:  publicKey,
+			PodIPs:     []string{nodeIP},
+			Endpoint:   nodeIP,
+			AllowedIPs: []string{primaryIP},
 		},
 	}
 
@@ -246,13 +255,13 @@ func createPeerResource() {
 	}
 }
 
-func createK8sClient() (kubernetes.Interface, error) {
+func createK8sClient() (client.Client, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	return kubernetes.NewForConfig(config)
+	return client.New(config, client.Options{Scheme: scheme})
 }
 
 func getNodeIP(k8sClient client.Client, nodeName string) (string, error) {
