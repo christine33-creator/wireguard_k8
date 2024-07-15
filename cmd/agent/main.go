@@ -159,6 +159,12 @@ func ensurePeeringWithGateways() {
 		cfg := wgtypes.PeerConfig{
 			PublicKey: mustParseKey(gateway.Spec.PublicKey),
 			Endpoint:  &net.UDPAddr{IP: net.ParseIP(gateway.Spec.Endpoint), Port: 51820},
+			AllowedIPs: []net.IPNet{
+				{
+					IP:   net.ParseIP(gateway.Spec.Endpoint),
+					Mask: net.CIDRMask(24, 32),
+				},
+			},
 		}
 
 		err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
