@@ -53,7 +53,7 @@ cd aks-mesh`
 **3. Deploy the CRDs**  
 `kubectl apply -f config/crd/bases`
 
-**4. (Test) Run Docker container in k8 cluster**  
+**4. (Optional Test) Run Docker container in k8 cluster**  
 `sudo docker run --privileged --device /dev/net/tun --cap-add=NET_ADMIN --cap-add=SYS_MODULE --security-opt seccomp=unconfined  
 -v /path/to/.kube/config  
 -e KUBECONFIG=/root/.kube/config  
@@ -63,8 +63,10 @@ cd aks-mesh`
 -e POD_IP=$(hostname -i)  
 <docker-image-created>`
 
-**5. Deploy the application in the cluster**  
-`kubectl create deployment <deployment-name> --image=<image-name>`
+**5. Create a deployment for the application in the cluster**    
+Edit the `aks-mesh` deployment to your configuration, then run
+
+`kubectl apply -f aks-mesh.yaml`
 
 
 ## Configuration

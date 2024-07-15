@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aks-mesh
+  namespace: kube-system
+  labels:
+    app: aks-mesh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aks-mesh
+  template:
+    metadata:
+      labels:
+        app: aks-mesh
+    spec:
+      serviceAccountName: aks-mesh-manager # Add the service account
+      containers:
+      - name: aks-mesh
+        image: <your_image>
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: POD_CIDR
+          value: "10.244.0.0/24" #kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}'
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources: {}
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["NET_ADMIN", "SYS_MODULE"]
+        volumeMounts:
+        - mountPath: /dev/net/tun
+          name: net-tun
+      volumes:
+      - name: net-tun
+        hostPath:
+          path: /dev/net/tun
+          type: CharDevice 

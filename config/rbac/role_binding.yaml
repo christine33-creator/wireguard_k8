@@ -11,5 +11,5 @@ roleRef:
   name: manager-role
 subjects:
 - kind: ServiceAccount
-  name: konnectivity-agent
+  name: aks-mesh-manager
   namespace: kube-system
