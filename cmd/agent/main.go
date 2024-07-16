@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
+	"github.com/t-chdossa_microsoft/aks-mesh/pkg/acn"
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -17,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -107,10 +110,11 @@ func ensureWireGuardInterface() {
 		log.Fatalf("Error getting WireGuard interface: %v", err)
 	}
 
-	nodeIP := getNodeIPAddress()
+	a := rand.Intn(253)
+	b := rand.Intn(253)
 	addr := &netlink.Addr{
 		IPNet: &net.IPNet{
-			IP:   net.ParseIP(nodeIP),
+			IP:   net.ParseIP(fmt.Sprintf("100.255.%d.%d", a, b)),
 			Mask: net.CIDRMask(24, 32),
 		},
 	}
@@ -151,12 +155,33 @@ func ensurePeeringWithGateways() {
 		log.Fatalf("Error getting WireGuard device: %v", err)
 	}
 
+	if wgdev.PrivateKey == [32]byte{} {
+		log.Default().Println("Generating new private key for WireGuard device...")
+		k, err := wgtypes.GeneratePrivateKey()
+		if err != nil {
+			log.Fatalf("Error generating private key: %v", err)
+		}
+
+		err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
+			PrivateKey: &k,
+		})
+		if err != nil {
+			log.Fatalf("Error configuring WireGuard device: %v", err)
+		}
+	}
+
 	for _, gateway := range gatewayList.Items {
 		fmt.Printf("Configuring peering with gateway: %s (Endpoint: %s, PublicKey: %s)\n", gateway.Name, gateway.Spec.Endpoint, gateway.Spec.PublicKey)
 
 		cfg := wgtypes.PeerConfig{
 			PublicKey: mustParseKey(gateway.Spec.PublicKey),
 			Endpoint:  &net.UDPAddr{IP: net.ParseIP(gateway.Spec.Endpoint), Port: 51820},
+			AllowedIPs: []net.IPNet{
+				{
+					IP:   net.ParseIP("100.255.0.0"),
+					Mask: net.CIDRMask(16, 32),
+				},
+			},
 		}
 
 		err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
@@ -194,14 +219,33 @@ func createPeerResource() {
 		log.Fatalf("Error getting WireGuard public key: %v", err)
 	}
 
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		log.Fatalf("Error creating in-cluster config: %s", err)
+	}
+	nncCli := acn.NewNncClient(cfg)
+
+	nnc, err := nncCli.GetNnc(nodeName)
+	if err != nil {
+		log.Fatalf("Error getting NodeNetworkConfig: %v", err)
+	}
+
+	if len(nnc.Status.NetworkContainers) == 0 {
+		log.Fatalf("No network containers found in NodeNetworkConfig %v", nnc)
+	}
+
+	primaryIP := nnc.Status.NetworkContainers[0].PrimaryIP
+
 	peer := &v1alpha1.Peer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "my-peer",
+			Name:      nodeName,
+			Namespace: metav1.NamespaceSystem,
 		},
 		Spec: v1alpha1.PeerSpec{
-			PublicKey: publicKey,
-			PodIPs:    []string{nodeIP},
-			Endpoint:  nodeIP,
+			PublicKey:  publicKey,
+			PodIPs:     []string{nodeIP},
+			Endpoint:   nodeIP,
+			AllowedIPs: []string{primaryIP},
 		},
 	}
 
@@ -214,12 +258,7 @@ func createPeerResource() {
 }
 
 func createK8sClient() (client.Client, error) {
-	kubeconfig := os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		return nil, fmt.Errorf("KUBECONFIG environment variable is not set")
-	}
-
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -244,11 +283,17 @@ func getNodeIP(k8sClient client.Client, nodeName string) (string, error) {
 }
 
 func getWireGuardPublicKey() (string, error) {
-	key, err := os.ReadFile("/etc/wireguard/publickey")
+	wgc, err := wgctrl.New()
 	if err != nil {
 		return "", err
 	}
-	return string(key), nil
+	defer wgc.Close()
+
+	dev, err := wgc.Device("wg0")
+	if err != nil {
+		return "", err
+	}
+	return dev.PublicKey.String(), nil
 }
 
 func mustParseKey(s string) wgtypes.Key {
