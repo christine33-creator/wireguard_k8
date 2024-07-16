@@ -8,6 +8,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
@@ -22,6 +24,8 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+const gatewayInfName = "wgg" // "wireguardgateway"
 
 var (
 	scheme = runtime.NewScheme()
@@ -52,17 +56,27 @@ func (w *WireGuard) Type() string {
 var _ netlink.Link = &WireGuard{}
 
 func main() {
-	var podCIDR string
+	var (
+		podCIDR         string
+		gatewayEndpoint string
+		nodeName        string
+	)
 	flag.StringVar(&podCIDR, "pod-cidr", "", "Overall pod cidr of the cluster")
+	flag.StringVar(&nodeName, "node-name", "", "Name of the node")
+	flag.StringVar(&gatewayEndpoint, "gateway-endpoint", "", "Endpoint of the gateway")
 	flag.Parse()
 	if podCIDR == "" {
 		panic("pod-cidr flag is required")
 	}
 
+	// Create a channel to receive OS signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
 	// initialize wireguard interface
 	// create a new wireguard interface
 	la := netlink.NewLinkAttrs()
-	la.Name = "wg0"
+	la.Name = gatewayInfName
 	l := &WireGuard{Attributes: &la}
 
 	err := netlink.LinkAdd(l)
@@ -70,14 +84,9 @@ func main() {
 		panic(err)
 	}
 
-	link, err := netlink.LinkByName("wg0")
+	link, err := netlink.LinkByName(gatewayInfName)
 	if err != nil {
 		log.Fatal(err)
-	}
-
-	podIP := os.Getenv("POD_IP")
-	if podIP == "" {
-		panic("POD_IP env var is required")
 	}
 
 	addr := netlink.Addr{
@@ -102,7 +111,7 @@ func main() {
 	cli, _ := wgctrl.New()
 	defer cli.Close()
 
-	wgdev, err := cli.Device("wg0")
+	wgdev, err := cli.Device(gatewayInfName)
 	if err != nil {
 		log.Fatalf("failed to get wireguard device: %s", err)
 	}
@@ -150,11 +159,11 @@ func main() {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create client: %v", err))
 	}
-	gatewayName := "gateway-" + podIP
+
 	gw := &v1alpha1.Gateway{}
 	err = c.Get(context.Background(), client.ObjectKey{
-		Namespace: "kube-system",
-		Name:      gatewayName,
+		Namespace: v1.NamespaceSystem,
+		Name:      nodeName,
 	}, gw)
 
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -164,12 +173,12 @@ func main() {
 	if apierrors.IsNotFound(err) {
 		gw = &v1alpha1.Gateway{
 			ObjectMeta: v1.ObjectMeta{
-				Name:      gatewayName,
-				Namespace: "kube-system",
+				Name:      nodeName,
+				Namespace: v1.NamespaceSystem,
 			},
 			Spec: v1alpha1.GatewaySpec{
 				PublicKey: k.PublicKey().String(),
-				Endpoint:  podIP,
+				Endpoint:  gatewayEndpoint,
 			},
 		}
 		err = c.Create(context.Background(), gw)
@@ -178,9 +187,9 @@ func main() {
 		}
 	} else {
 		// update if publickey or endpoint has changed
-		if gw.Spec.PublicKey != k.PublicKey().String() || gw.Spec.Endpoint != podIP {
+		if gw.Spec.PublicKey != k.PublicKey().String() || gw.Spec.Endpoint != gatewayEndpoint {
 			gw.Spec.PublicKey = k.PublicKey().String()
-			gw.Spec.Endpoint = podIP
+			gw.Spec.Endpoint = gatewayEndpoint
 			err = c.Update(context.Background(), gw)
 			if err != nil {
 				panic(fmt.Sprintf("failed to update gateway: %v", err))
@@ -190,7 +199,7 @@ func main() {
 
 	// List nodes every 2 seconds
 	peerCache := make(map[string]v1alpha1.Peer)
-	wgdev, err = cli.Device("wg0")
+	wgdev, err = cli.Device(gatewayInfName)
 	if err != nil {
 		log.Fatalf("failed to get wireguard device: %s", err)
 	}
@@ -200,7 +209,14 @@ func main() {
 	}
 
 	for {
-		time.Sleep(2 * time.Second)
+		select {
+		case sig := <-sigChan:
+			log.Printf("received signal: %s, performing cleanup", sig)
+			cleanup(nodeName)
+			return
+		default:
+			time.Sleep(2 * time.Second)
+		}
 
 		peers := &v1alpha1.PeerList{}
 		err = c.List(context.Background(), peers)
@@ -214,7 +230,7 @@ func main() {
 				// add peer to wireguard device
 				cfg := wgtypes.PeerConfig{
 					PublicKey: mustParseKey(peer.Spec.PublicKey),
-					Endpoint:  &net.UDPAddr{IP: net.ParseIP(peer.Spec.Endpoint), Port: 51820},
+					Endpoint:  &net.UDPAddr{IP: net.ParseIP(peer.Spec.Endpoint), Port: 51821},
 					AllowedIPs: []net.IPNet{
 						{
 							IP:   net.ParseIP(peer.Spec.MeshIP),
@@ -243,6 +259,52 @@ func main() {
 				peerCache[peer.Spec.PublicKey] = peer
 			}
 		}
+	}
+}
+
+func cleanup(gatewayName string) {
+	// delete the wgg interface if it exists
+	link, err := netlink.LinkByName(gatewayInfName)
+	if err == nil {
+		err = netlink.LinkDel(link)
+		if err != nil {
+			log.Printf("failed to delete link: %s", err)
+		}
+	}
+
+	// delete the gateway resource
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	c, err := client.New(config, client.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		panic(fmt.Sprintf("failed to create client: %v", err))
+	}
+	err = c.Get(context.Background(), client.ObjectKey{
+		Namespace: v1.NamespaceSystem,
+		Name:      gatewayName,
+	}, &v1alpha1.Gateway{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.Printf("failed to get gateway: %s", err)
+		return
+	}
+	if apierrors.IsNotFound(err) {
+		log.Printf("gateway resource not found, nothing to do")
+		return
+	}
+
+	err = c.Delete(context.Background(), &v1alpha1.Gateway{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      gatewayName,
+			Namespace: v1.NamespaceSystem,
+		},
+	})
+	if err != nil {
+		log.Printf("failed to delete gateway: %s", err)
 	}
 }
 

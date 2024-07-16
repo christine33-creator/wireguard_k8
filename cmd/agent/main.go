@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
@@ -31,6 +34,8 @@ func init() {
 	_ = v1alpha1.AddToScheme(scheme)
 }
 
+const agentInfName = "wga" // "wireguardagent"
+
 type WireGuard struct {
 	Attributes *netlink.LinkAttrs
 }
@@ -46,14 +51,51 @@ func (w *WireGuard) Type() string {
 var _ netlink.Link = &WireGuard{}
 
 func main() {
+	// Create a channel to receive OS signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
 	fmt.Println("Starting WireGuard agent setup...")
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()
 	createPeerResource()
 	fmt.Println("Completed setup.")
 	for {
-		time.Sleep(2 * time.Second)
-		ensurePeeringWithGateways()
+		select {
+		case sig := <-sigChan:
+			log.Printf("Received signal: %s. performing cleanup", sig)
+			cleanup()
+			return
+		default:
+			time.Sleep(2 * time.Second)
+			ensurePeeringWithGateways()
+		}
+	}
+}
+
+// this is all best effort so not blocking on any error
+func cleanup() {
+	// remove the wireguard interface
+	link, err := netlink.LinkByName(agentInfName)
+	if err != nil {
+		log.Printf("could not get link %s: %v", agentInfName, err)
+	} else {
+		netlink.LinkDel(link)
+	}
+	// remove the peer resource
+	k8sClient, err := createK8sClient()
+	if err != nil {
+		log.Printf("Error creating Kubernetes client: %v", err)
+		return
+	}
+	err = k8sClient.Delete(context.Background(), &v1alpha1.Peer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      os.Getenv("NODE_NAME"),
+			Namespace: metav1.NamespaceSystem,
+		},
+	})
+	if err != nil {
+		log.Printf("Error deleting Peer resource: %v", err)
 	}
 }
 
@@ -61,15 +103,15 @@ func ensureWireGuardInterface() {
 	fmt.Println("Ensuring WireGuard interface...")
 
 	la := netlink.NewLinkAttrs()
-	la.Name = "wg0"
+	la.Name = agentInfName
 	wgLink := &WireGuard{Attributes: &la}
 
 	err := netlink.LinkAdd(wgLink)
-	if err != nil && err.Error() != "file exists" {
+	if err != nil && !errors.Is(err, os.ErrExist) {
 		log.Fatalf("Error creating WireGuard interface: %v", err)
 	}
 
-	link, err := netlink.LinkByName("wg0")
+	link, err := netlink.LinkByName(agentInfName)
 	if err != nil {
 		log.Fatalf("Error getting WireGuard interface: %v", err)
 	}
@@ -84,7 +126,7 @@ func ensureWireGuardInterface() {
 	}
 
 	err = netlink.AddrAdd(link, addr)
-	if err != nil && err.Error() != "file exists" {
+	if err != nil && !errors.Is(err, os.ErrExist) {
 		log.Fatalf("Error adding IP address to WireGuard interface: %v", err)
 	}
 
@@ -115,7 +157,7 @@ func ensurePeeringWithGateways() {
 	}
 	defer cli.Close()
 
-	wgdev, err := cli.Device("wg0")
+	wgdev, err := cli.Device(agentInfName)
 	if err != nil {
 		log.Fatalf("Error getting WireGuard device: %v", err)
 	}
@@ -126,8 +168,11 @@ func ensurePeeringWithGateways() {
 		if err != nil {
 			log.Fatalf("Error generating private key: %v", err)
 		}
+
+		listPort := 51821
 		err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
 			PrivateKey: &k,
+			ListenPort: &listPort,
 		})
 		if err != nil {
 			log.Fatalf("Error configuring WireGuard device: %v", err)
@@ -207,6 +252,7 @@ func createPeerResource() {
 			PodIPs:     []string{nodeIP},
 			Endpoint:   nodeIP,
 			AllowedIPs: []string{primaryIP},
+			MeshIP:     getWireGuardIP(),
 		},
 	}
 
@@ -216,6 +262,22 @@ func createPeerResource() {
 	}
 
 	fmt.Println("Peer resource created successfully.")
+}
+
+func getWireGuardIP() string {
+	// read the addr assigned to interface wga
+	link, err := netlink.LinkByName(agentInfName)
+	if err != nil {
+		log.Fatalf("Error getting WireGuard interface: %v", err)
+	}
+	addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	if err != nil {
+		log.Fatalf("Error getting WireGuard interface addresses: %v", err)
+	}
+	if len(addrs) == 0 {
+		log.Fatalf("WireGuard interface has no addresses")
+	}
+	return addrs[0].IP.String()
 }
 
 func createK8sClient() (client.Client, error) {
@@ -247,7 +309,7 @@ func getWireGuardPublicKey() (string, error) {
 	}
 	defer wgc.Close()
 
-	dev, err := wgc.Device("wg0")
+	dev, err := wgc.Device(agentInfName)
 	if err != nil {
 		return "", err
 	}
