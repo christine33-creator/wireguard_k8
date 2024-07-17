@@ -2,20 +2,24 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 	"github.com/t-chdossa_microsoft/aks-mesh/pkg/acn"
 	"github.com/vishvananda/netlink"
+
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -30,6 +34,8 @@ func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = v1alpha1.AddToScheme(scheme)
 }
+
+const agentInfName = "wga" // "wireguardagent"
 
 type WireGuard struct {
 	Attributes *netlink.LinkAttrs
@@ -46,14 +52,51 @@ func (w *WireGuard) Type() string {
 var _ netlink.Link = &WireGuard{}
 
 func main() {
+	// Create a channel to receive OS signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
 	fmt.Println("Starting WireGuard agent setup...")
 	ensureWireGuardInterface()
 	ensurePeeringWithGateways()
 	createPeerResource()
 	fmt.Println("Completed setup.")
 	for {
-		time.Sleep(2 * time.Second)
-		ensurePeeringWithGateways()
+		select {
+		case sig := <-sigChan:
+			log.Printf("Received signal: %s. performing cleanup", sig)
+			cleanup()
+			return
+		default:
+			time.Sleep(2 * time.Second)
+			ensurePeeringWithGateways()
+		}
+	}
+}
+
+// this is all best effort so not blocking on any error
+func cleanup() {
+	// remove the wireguard interface
+	link, err := netlink.LinkByName(agentInfName)
+	if err != nil {
+		log.Printf("could not get link %s: %v", agentInfName, err)
+	} else {
+		netlink.LinkDel(link)
+	}
+	// remove the peer resource
+	k8sClient, err := createK8sClient()
+	if err != nil {
+		log.Printf("Error creating Kubernetes client: %v", err)
+		return
+	}
+	err = k8sClient.Delete(context.Background(), &v1alpha1.Peer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      os.Getenv("NODE_NAME"),
+			Namespace: metav1.NamespaceSystem,
+		},
+	})
+	if err != nil {
+		log.Printf("Error deleting Peer resource: %v", err)
 	}
 }
 
@@ -61,30 +104,30 @@ func ensureWireGuardInterface() {
 	fmt.Println("Ensuring WireGuard interface...")
 
 	la := netlink.NewLinkAttrs()
-	la.Name = "wg0"
+	la.Name = agentInfName
 	wgLink := &WireGuard{Attributes: &la}
 
 	err := netlink.LinkAdd(wgLink)
-	if err != nil && err.Error() != "file exists" {
+	if err != nil && !errors.Is(err, os.ErrExist) {
 		log.Fatalf("Error creating WireGuard interface: %v", err)
 	}
 
-	link, err := netlink.LinkByName("wg0")
+	link, err := netlink.LinkByName(agentInfName)
 	if err != nil {
 		log.Fatalf("Error getting WireGuard interface: %v", err)
 	}
 
-	a := rand.Intn(254)
+	a := rand.Intn(31)
 	b := rand.Intn(254)
 	addr := &netlink.Addr{
 		IPNet: &net.IPNet{
-			IP:   net.ParseIP(fmt.Sprintf("100.255.%d.%d", a, b)),
-			Mask: net.CIDRMask(24, 32),
+			IP:   net.ParseIP(fmt.Sprintf("100.255.%d.%d", a+224, b+1)),
+			Mask: net.CIDRMask(19, 32),
 		},
 	}
 
 	err = netlink.AddrAdd(link, addr)
-	if err != nil && err.Error() != "file exists" {
+	if err != nil && !errors.Is(err, os.ErrExist) {
 		log.Fatalf("Error adding IP address to WireGuard interface: %v", err)
 	}
 
@@ -115,7 +158,7 @@ func ensurePeeringWithGateways() {
 	}
 	defer cli.Close()
 
-	wgdev, err := cli.Device("wg0")
+	wgdev, err := cli.Device(agentInfName)
 	if err != nil {
 		log.Fatalf("Error getting WireGuard device: %v", err)
 	}
@@ -126,8 +169,11 @@ func ensurePeeringWithGateways() {
 		if err != nil {
 			log.Fatalf("Error generating private key: %v", err)
 		}
+
+		listPort := 51821
 		err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
 			PrivateKey: &k,
+			ListenPort: &listPort,
 		})
 		if err != nil {
 			log.Fatalf("Error configuring WireGuard device: %v", err)
@@ -207,15 +253,56 @@ func createPeerResource() {
 			PodIPs:     []string{nodeIP},
 			Endpoint:   nodeIP,
 			AllowedIPs: []string{primaryIP},
+			MeshIP:     getWireGuardIP(),
 		},
 	}
 
-	err = k8sClient.Create(context.Background(), peer)
+	peer, err = createOrUpdate(peer, k8sClient)
 	if err != nil {
 		log.Fatalf("Error creating Peer resource: %v", err)
 	}
 
 	fmt.Println("Peer resource created successfully.")
+}
+
+func createOrUpdate(p *v1alpha1.Peer, cli client.Client) (*v1alpha1.Peer, error) {
+	var curr v1alpha1.Peer
+	err := cli.Get(context.TODO(), client.ObjectKeyFromObject(p), &curr)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+
+	if apierrors.IsNotFound(err) {
+		// create
+		if err = cli.Create(context.TODO(), p); err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+
+	// update
+	p.Spec.DeepCopyInto(&curr.Spec)
+
+	if err = cli.Update(context.TODO(), &curr); err != nil {
+		return nil, err
+	}
+	return &curr, nil
+}
+
+func getWireGuardIP() string {
+	// read the addr assigned to interface wga
+	link, err := netlink.LinkByName(agentInfName)
+	if err != nil {
+		log.Fatalf("Error getting WireGuard interface: %v", err)
+	}
+	addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
+	if err != nil {
+		log.Fatalf("Error getting WireGuard interface addresses: %v", err)
+	}
+	if len(addrs) == 0 {
+		log.Fatalf("WireGuard interface has no addresses")
+	}
+	return addrs[0].IP.String()
 }
 
 func createK8sClient() (client.Client, error) {
@@ -247,7 +334,7 @@ func getWireGuardPublicKey() (string, error) {
 	}
 	defer wgc.Close()
 
-	dev, err := wgc.Device("wg0")
+	dev, err := wgc.Device(agentInfName)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +353,7 @@ func createConfigMap(k8sClient kubernetes.Interface, publicKey string) error {
 	}
 	_, err := k8sClient.CoreV1().ConfigMaps("kube-system").Create(context.TODO(), configMap, metav1.CreateOptions{})
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
+		if apierrors.IsAlreadyExists(err) {
 			fmt.Println("ConfigMap already exists.")
 			return nil
 		}
