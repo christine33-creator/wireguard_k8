@@ -55,6 +55,19 @@ func (w *WireGuard) Type() string {
 
 var _ netlink.Link = &WireGuard{}
 
+func cleanupOldInf() {
+	link, err := netlink.LinkByName("wg0")
+	if err != nil {
+		if errors.As(err, &netlink.LinkNotFoundError{}) {
+			log.Printf("wg0 does not exist, no need to cleanup")
+			return
+		}
+
+		log.Fatalf("cannot get interface wg0: %s", err)
+	}
+	netlink.LinkDel(link)
+}
+
 func main() {
 	var (
 		podCIDR         string
@@ -68,10 +81,18 @@ func main() {
 	if podCIDR == "" {
 		panic("pod-cidr flag is required")
 	}
+	if nodeName == "" {
+		panic("node-name required")
+	}
+	if gatewayEndpoint == "" {
+		panic("gateway-endpoint required")
+	}
 
 	// Create a channel to receive OS signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	cleanupOldInf()
 
 	// initialize wireguard interface
 	// create a new wireguard interface
@@ -92,7 +113,7 @@ func main() {
 	addr := netlink.Addr{
 		IPNet: &net.IPNet{
 			// 100.255.254.0/19
-			IP:   net.ParseIP("100.255.254.4"),
+			IP:   net.ParseIP("100.255.224.4"),
 			Mask: net.CIDRMask(19, 32),
 		},
 	}
@@ -124,8 +145,10 @@ func main() {
 	}
 
 	log.Printf("wireguard device: %v", wgdev)
+	lisPort := 51820
 	err = cli.ConfigureDevice(wgdev.Name, wgtypes.Config{
 		PrivateKey: &k,
+		ListenPort: &lisPort,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("failed to configure wireguard device: %s", err))

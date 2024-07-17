@@ -15,10 +15,11 @@ import (
 	"github.com/t-chdossa_microsoft/aks-mesh/api/v1alpha1"
 	"github.com/t-chdossa_microsoft/aks-mesh/pkg/acn"
 	"github.com/vishvananda/netlink"
+
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -116,12 +117,12 @@ func ensureWireGuardInterface() {
 		log.Fatalf("Error getting WireGuard interface: %v", err)
 	}
 
-	a := rand.Intn(254)
+	a := rand.Intn(31)
 	b := rand.Intn(254)
 	addr := &netlink.Addr{
 		IPNet: &net.IPNet{
-			IP:   net.ParseIP(fmt.Sprintf("100.255.%d.%d", a, b)),
-			Mask: net.CIDRMask(24, 32),
+			IP:   net.ParseIP(fmt.Sprintf("100.255.%d.%d", a+224, b+1)),
+			Mask: net.CIDRMask(19, 32),
 		},
 	}
 
@@ -256,12 +257,36 @@ func createPeerResource() {
 		},
 	}
 
-	err = k8sClient.Create(context.Background(), peer)
+	peer, err = createOrUpdate(peer, k8sClient)
 	if err != nil {
 		log.Fatalf("Error creating Peer resource: %v", err)
 	}
 
 	fmt.Println("Peer resource created successfully.")
+}
+
+func createOrUpdate(p *v1alpha1.Peer, cli client.Client) (*v1alpha1.Peer, error) {
+	var curr v1alpha1.Peer
+	err := cli.Get(context.TODO(), client.ObjectKeyFromObject(p), &curr)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+
+	if apierrors.IsNotFound(err) {
+		// create
+		if err = cli.Create(context.TODO(), p); err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+
+	// update
+	p.Spec.DeepCopyInto(&curr.Spec)
+
+	if err = cli.Update(context.TODO(), &curr); err != nil {
+		return nil, err
+	}
+	return &curr, nil
 }
 
 func getWireGuardIP() string {
