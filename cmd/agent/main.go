@@ -353,7 +353,7 @@ func createConfigMap(k8sClient kubernetes.Interface, publicKey string) error {
 	}
 	_, err := k8sClient.CoreV1().ConfigMaps("kube-system").Create(context.TODO(), configMap, metav1.CreateOptions{})
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
+		if apierrors.IsAlreadyExists(err) {
 			fmt.Println("ConfigMap already exists.")
 			return nil
 		}
