@@ -1,4 +1,4 @@
-# AKS Mesh: A WireGuard-based Kubernetes CNI
+# AKS Mesh: A WireGuard-based Kubernetes CNI (TO EDIT)
 
 **AKS Mesh** creates a secure, encrypted VPN communication mesh within a Kubernetes cluster using WireGuard. By leveraging Konnectivity and operating in host-network mode, it offers enhanced flexibility and performance while maintaining compatibility with existing setups.
 
