@@ -1,4 +1,4 @@
-# AKS Mesh: A WireGuard-based Kubernetes CNI (TO EDIT)
+# AKS Mesh: A WireGuard-based Kubernetes Network Policy
 
 **AKS Mesh** creates a secure, encrypted VPN communication mesh within a Kubernetes cluster using WireGuard. By leveraging Konnectivity and operating in host-network mode, it offers enhanced flexibility and performance while maintaining compatibility with existing setups.
 
@@ -8,7 +8,7 @@
 
 **Konnectivity** is a Kubernetes network plugin that provides network connectivity for Pods without relying on traditional CNI plugins. It allows Pods to communicate directly with services and other Pods, even when they are not in the same network namespace.
 
-**AKS Mesh** combines these technologies to create a highly performant and secure overlay network within a Kubernetes cluster.
+**AKS Mesh** combines these technologies to create a highly performant and secure overlay network policy within a Kubernetes cluster.
 
 ### How it works
 
@@ -50,26 +50,45 @@ cd aks-mesh`
 **2. Build and push the Docker image**  
 `docker build --platform="linux/amd64" -t <container-name> --push .`
 
-**3. Deploy the CRDs**  
-`kubectl apply -f config/crd/bases`
+**3. Deploy the gateway and agents**  
+- Deploying the gateway along with konnectivity pods can be achieved by adding a gateway container inside the konnectivity deployment in the pipeline:
+```
+containers:
+      - name: aks-mesh-gateway
+        image: <image_name>
+        securityContext:
+          capabilities:
+            add:
+              - NET_ADMIN
+        command: ["./gateway"]
+        env:
+          - name: NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+        args:
+          - "--node-name=$(NODE_NAME)"
+          - "--gateway-endpoint=$(NODE_IP)"
+          - "--pod-cidr={{ range $i, $cidr := .Values.global.commonGlobals.CIDR.ClusterCidrs }}{{- if $i }},{{- end }}{{ $cidr }}{{- end }}"
+```
 
-**4. (Test) Run Docker container in k8 cluster**  
-`sudo docker run --privileged --device /dev/net/tun --cap-add=NET_ADMIN --cap-add=SYS_MODULE --security-opt seccomp=unconfined  
--v /path/to/.kube/config  
--e KUBECONFIG=/root/.kube/config  
--e POD_CIDR=$(hostname -i)  
--e KUBECONFIG_SERVICE_HOST=<your-service-host>  
--e KUBERNETES_SERVICE_PORT=443  
--e POD_IP=$(hostname -i)  
-<docker-image-created>`
+**4. Deploy the CRDs and RBAC**  
+Create `peer` and `gateway` CRDs to define the mesh topology.
+`kubectl apply -f config/crd/bases`
+`kubectl apply -f config/rbac`
+
 
 **5. Deploy the application in the cluster**  
 `kubectl create deployment <deployment-name> --image=<image-name>`
 
-
-## Configuration
-
-Create `peer` and `gateway` CRDs to define the mesh topology.
 
 ## Use Cases
 
