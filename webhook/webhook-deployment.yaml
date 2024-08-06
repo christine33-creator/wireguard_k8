@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: konnectivity-webhook
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: konnectivity-webhook
+  template:
+    metadata:
+      labels:
+        app: konnectivity-webhook
+    spec:
+      containers:
+      - name: konnectivity-webhook
+        image: <your-webhook-image>
+        ports:
+        - containerPort: 8443
+        volumeMounts:
+        - name: webhook-certs
+          mountPath: /etc/webhook/certs
+          readOnly: true
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: konnectivity-webhook-certs
