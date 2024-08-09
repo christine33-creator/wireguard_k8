@@ -95,6 +95,13 @@ Create `peer` and `gateway` CRDs to define the mesh topology.
 - **Secure communication between applications**: Establish secure connections between applications running in different Pods or namespaces.
 - **Service mesh integration**: Integrate with service mesh solutions for additional traffic management and security features.
 
+## Solution: --agent-identifiers
+In this solution, the metrics server pod will now have its own konnectivity agent sidecar. By default, one set of agents handling all traffic. But in this case, the sidecar will ensure direct connectivity between the API server and Metrics Server. The implemention steps are:
+- Add `\proxy-agent` container to the metrics server pod
+- Set the agent identifier to `ipv4=$POD_IP`
+- In this case API server resolves to the IP before connecting to konnectivity, so we can expose the pod IP via the downward API
+- Because of the way these agent identifiers work, if that connectivity agent sidecar is broken somehow and can't start, then it will never register itself with connectivity server.
+
 ## Troubleshooting
 
 ### Common Issues and Solutions
